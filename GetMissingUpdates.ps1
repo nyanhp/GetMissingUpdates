@@ -4,8 +4,6 @@
     Script to search updates
 .DESCRIPTION
     Script to search for missing security updates on remote endpoints used in the Microsoft Baseline Security Analyser
-.NOTES
-    Author: Jan-Hendrik Peters, Andreas Mirbach
 .PARAMETER ComputerName
     The machine to connect to
 .PARAMETER Path
@@ -17,6 +15,7 @@
 .PARAMETER Credential
     The credential to use instead of using Kerberos
 .NOTES
+    Author: Jan-Hendrik Peters, Andreas Mirbach
 # Disclaimer
 # This module and it's scripts are not supported under any Microsoft standard support program or service.
 # The scripts are provided AS IS without warranty of any kind.
