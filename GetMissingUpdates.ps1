@@ -30,7 +30,6 @@ param
     $Credential
 )
 
-
 function Send-File
 {
     <#
@@ -101,7 +100,6 @@ function Send-File
 	
     Write-Host "PSFileTransfer: Finished sending file $Source"
 }
-
 function Write-File
 {
     param (
@@ -147,8 +145,10 @@ function Get-MissingUpdates
 {
     param
     (
+        [string[]]
         $ComputerName,
 
+        [string]
         $Path,
 
         [Parameter()]
@@ -160,94 +160,7 @@ function Get-MissingUpdates
         $Credential
     )
 
-    Write-Host ('Creating session to {0}' -f $ComputerName)
-
-    $sessionParameters = @{
-        ComputerName = $ComputerName
-        ErrorAction  = 'Stop'
-        Name         = 'WuaSession'
-    }
-
-    if ($Credential)
-    {
-        $sessionParameters.Add('Credential', $Credential)
-    }
-
-    try
-    {
-        $session = New-PSSession @sessionParameters
-    }
-    catch
-    {
-        Write-Host ('Error establishing connection to {0}. Error message was {1}' -f $ComputerName, $_.Exception.Message) 
-        Write-Error -Message ('Error establishing connection to {0}. Error message was {1}' -f $ComputerName, $_.Exception.Message) -Exception $_.Exception -TargetObject $ComputerName
-        return $null
-    }
-
-    try
-    {
-        $osRoot = Invoke-Command -Session $session -ScriptBlock { $env:SystemDrive } -ErrorAction Stop | Select-Object -First 1
-    }
-    catch
-    {
-        Write-Host ('Error retrieving OS root path from {0}. Assuming issue with the connection. Error was {1}' -f $ComputerName, $_.Exception.Message)
-        Write-Error -Message ('Error retrieving OS root path from {0}. Assuming issue with the connection. Error was {1}' -f $ComputerName, $_.Exception.Message)
-    }
-
-    try
-    {
-        $osPSVersion = Invoke-Command -Session $session -ScriptBlock { $PSVersionTable.PSVersion.Major } -ErrorAction Stop | Sort-Object | Select-Object -First 1
-    }
-    catch
-    {
-        Write-Host ('Error retrieving OS Powershell version from {0}. Assuming issue with the connection. Error was {1}' -f $ComputerName, $_.Exception.Message)
-        Write-Error -Message ('Error retrieving OS Powershell version from {0}. Assuming issue with the connection. Error was {1}' -f $ComputerName, $_.Exception.Message)
-    }
-
-    $adminShare = '\\{0}\{1}$' -f $ComputerName, ($osRoot -replace '[:\\]')
-    $useSmb = Test-Path $adminShare
-
-    $destination = (Join-Path -Path $osRoot -ChildPath wsusscn2.cab)
-
-    if ($useSmb)
-    {
-        $smbDestination = (Join-Path -Path $adminShare -ChildPath wsusscn2.cab)
-
-        try
-        {
-            Write-Host ('Using Copy-Item to copy {0} to {1} on {2}' -f $Path, $smbDestination, $ComputerName)
-            Copy-Item -Path $Path -Destination $smbDestination -Force -ErrorAction Stop
-        }
-        catch
-        {
-            Write-Host ('Error copying {0} to {1} on target machine {2}' -f $Path, $smbDestination, $ComputerName)
-            Write-Error -Exception $_.Exception -Message ('Error copying {0} to {1} on target machine {2}' -f $Path, $smbDestination, $ComputerName) -TargetObject $Path -Category InvalidOperation
-            return $null
-        }
-    }
-    else
-    {
-        try
-        {
-            if ($PSVersionTable.PSVersion.Major -lt 5 -or $osPSVersion -lt 3)
-            {
-                Write-Host ('Using Send-File to copy {0} to {1} on {2} in 1MB chunks' -f $Path, $destination, $ComputerName)
-                Send-File -Source $Path -Destination $destination -Session $session -ChunkSize 1MB -ErrorAction Stop
-            }
-            else
-            {
-                Write-Host ('Using Copy-Item -ToSession to copy {0} to {1} on {2}' -f $Path, $destination, $ComputerName)
-                Copy-Item -ToSession $session -Path $Path -Destination $destination -ErrorAction Stop
-            }
-        }
-        catch
-        {
-            Write-Host ('Error copying {0} to {1} on target machine {2}' -f $Path, $destination, $ComputerName)
-            Write-Error -Exception $_.Exception -Message ('Error copying {0} to {1} on target machine {2}' -f $Path, $destination, $ComputerName) -TargetObject $Path -Category InvalidOperation
-            return $null
-        }
-    }
-    
+    Write-Host ('Creating sessions to {0}' -f ($ComputerName -join ','))
 
     $remoteScript = {
         param
@@ -414,13 +327,119 @@ function Get-MissingUpdates
         return $missingUpdates
     }
 
-    $returnValues = Invoke-Command -Session $session -ScriptBlock $remoteScript -HideComputerName -ErrorAction Stop -ArgumentList ($destination, $UpdateSearchFilter)
-    $session | Remove-PSSession
+    $remoteJobs = foreach ( $computer in $ComputerName)
+    {        
+
+        Start-Job -Name "RemoteUpdateCheck_$computer" -ScriptBlock {
+            param(
+                $session,
+                $computer,
+                $Path,
+                $UpdateSearchFilter,
+                $remoteScript,
+                $Credential
+            )
+            $sessionParameters = @{
+                ComputerName = $computer
+                ErrorAction  = 'Stop'
+                Name         = 'WuaSession'
+            }
+        
+            $remoteScript = [scriptblock]::Create($remoteScript)
+            
+            if ($Credential)
+            {
+                $sessionParameters.Add('Credential', $Credential)
+            }
+    
+            try
+            {
+                $session = New-PSSession @sessionParameters
+            }
+            catch
+            {
+                Write-Host ('Error establishing connection to {0}. Error message was {1}' -f $computer, $_.Exception.Message) 
+                Write-Error -Message ('Error establishing connection to {0}. Error message was {1}' -f $computer, $_.Exception.Message) -Exception $_.Exception -TargetObject $computer
+                return $null
+            }
+
+            try
+            {
+                $osRoot = Invoke-Command -Session $session -ScriptBlock { $env:SystemDrive } -ErrorAction Stop
+            }
+            catch
+            {
+                Write-Host ('Error retrieving OS root path from {0}. Assuming issue with the connection. Error was {1}' -f $computer, $_.Exception.Message)
+                Write-Error -Message ('Error retrieving OS root path from {0}. Assuming issue with the connection. Error was {1}' -f $computer, $_.Exception.Message)
+            }
+    
+            try
+            {
+                $osPSVersion = Invoke-Command -Session $session -ScriptBlock { $PSVersionTable.PSVersion.Major } -ErrorAction Stop
+            }
+            catch
+            {
+                Write-Host ('Error retrieving OS Powershell version from {0}. Assuming issue with the connection. Error was {1}' -f $computer, $_.Exception.Message)
+                Write-Error -Message ('Error retrieving OS Powershell version from {0}. Assuming issue with the connection. Error was {1}' -f $computer, $_.Exception.Message)
+            }
+
+            $adminShare = '\\{0}\{1}$' -f $computer, ($osRoot -replace '[:\\]')
+            $useSmb = Test-Path $adminShare
+
+            $destination = (Join-Path -Path $osRoot -ChildPath wsusscn2.cab)
+
+            if ($useSmb)
+            {
+                $smbDestination = (Join-Path -Path $adminShare -ChildPath wsusscn2.cab)
+
+                try
+                {
+                    Write-Host ('Using Copy-Item to copy {0} to {1} on {2}' -f $Path, $smbDestination, $computer)
+                    Copy-Item -Path $Path -Destination $smbDestination -Force -ErrorAction Stop
+                }
+                catch
+                {
+                    Write-Host ('Error copying {0} to {1} on target machine {2}' -f $Path, $smbDestination, $computer)
+                    Write-Error -Exception $_.Exception -Message ('Error copying {0} to {1} on target machine {2}' -f $Path, $smbDestination, $computer) -TargetObject $Path -Category InvalidOperation
+                    return $null
+                }
+            }
+            else
+            {
+                try
+                {
+                    if ($PSVersionTable.PSVersion.Major -lt 5 -or $osPSVersion -lt 3)
+                    {
+                        Write-Host ('Using Send-File to copy {0} to {1} on {2} in 1MB chunks' -f $Path, $destination, $computer)
+                        Send-File -Source $Path -Destination $destination -Session $session -ChunkSize 1MB -ErrorAction Stop
+                    }
+                    else
+                    {
+                        Write-Host ('Using Copy-Item -ToSession to copy {0} to {1} on {2}' -f $Path, $destination, $computer)
+                        Copy-Item -ToSession $session -Path $Path -Destination $destination -ErrorAction Stop
+                    }
+                }
+                catch
+                {
+                    Write-Host ('Error copying {0} to {1} on target machine {2}' -f $Path, $destination, $computer)
+                    Write-Error -Exception $_.Exception -Message ('Error copying {0} to {1} on target machine {2}' -f $Path, $destination, $computer) -TargetObject $Path -Category InvalidOperation
+                    return $null
+                }
+            }
+
+            Invoke-Command -Session $session -ScriptBlock $remoteScript -HideComputerName -ErrorAction Stop -ArgumentList ($destination, $UpdateSearchFilter)
+        } -ArgumentList @($session, $computer, $Path, $UpdateSearchFilter, $remoteScript, $Credential)
+    }
+
+    Write-Verbose -Message ('Waiting for {0} remote jobs to finish' -f $remoteJobs.Count)
+    $remoteJobs | Wait-Job
+
+    $returnValues = $remoteJobs | Receive-Job
+    $sessions | Remove-PSSession
 
     return $returnValues
 }
 
-# No $PSBoundParameters in CASE...
 $parameters = @{
     ComputerName = $ComputerName
     Path         = $Path
