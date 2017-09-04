@@ -17,9 +17,14 @@ param
     [System.String[]]
     $ComputerName,
 
-    [Parameter(Mandatory = $true)]
+    [Parameter(Mandatory = $true, ParameterSetName = 'Path')]
     [System.String]
-    $Path, 
+    $Path,
+
+    # As of Sep 2017 http://go.microsoft.com/fwlink/?linkid=74689
+    [Parameter(Mandatory = $true, ParameterSetName = 'Url')]
+    [System.String]
+    $DownloadUri,
 
     [Parameter()]
     [System.String]
@@ -29,6 +34,13 @@ param
     [pscredential]
     $Credential
 )
+
+if ($DownloadUri)
+{
+    $Path = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath wsusscn2.cab
+
+    Invoke-WebRequest -Uri $DownloadUri -OutFile $Path
+}
 
 function Send-File
 {
@@ -346,7 +358,7 @@ function Get-MissingUpdates
             }
         
             $remoteScript = [scriptblock]::Create($remoteScript)
-            
+
             if ($Credential)
             {
                 $sessionParameters.Add('Credential', $Credential)
