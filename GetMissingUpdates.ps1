@@ -361,7 +361,6 @@ function Get-MissingUpdates
 
         Start-Job -Name "RemoteUpdateCheck_$computer" -ScriptBlock {
             param(
-                $session,
                 $computer,
                 $Path,
                 $UpdateSearchFilter,
@@ -457,15 +456,15 @@ function Get-MissingUpdates
             }
 
             Invoke-Command -Session $session -ScriptBlock $remoteScript -HideComputerName -ErrorAction Stop -ArgumentList ($destination, $UpdateSearchFilter)
-        } -ArgumentList @($session, $computer, $Path, $UpdateSearchFilter, $remoteScript, $Credential)
+
+            $session | Remove-PSSession
+        } -ArgumentList @($computer, $Path, $UpdateSearchFilter, $remoteScript, $Credential)
     }
 
     Write-Verbose -Message ('Waiting for {0} remote jobs to finish' -f $remoteJobs.Count)
     $remoteJobs | Wait-Job
 
     $returnValues = $remoteJobs | Receive-Job
-    $sessions | Remove-PSSession
-
     return $returnValues
 }
 
