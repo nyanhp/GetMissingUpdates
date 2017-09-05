@@ -465,7 +465,6 @@ function Get-MissingUpdates
     $remoteJobs | Wait-Job
 
     $returnValues = $remoteJobs | Receive-Job
-
     return $returnValues
 }
 
