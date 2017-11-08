@@ -209,12 +209,18 @@ function Get-MissingUpdates
         }
         " -ErrorAction SilentlyContinue
 
+        if (-not (Test-Path -Path $destination))
+        {
+            throw "Unable to locate $destination. Cancelling..."
+        }
+
         $updateSession = New-Object -ComObject Microsoft.Update.Session
         $updateServiceManager = New-Object -ComObject Microsoft.Update.ServiceManager
 
         try 
         {
             $UpdateService = $UpdateServiceManager.AddScanPackageService("Offline Sync Service", $Destination)
+            Write-Verbose -Message "Successfully added scan service with $destination"
         }
         catch 
         {
@@ -250,6 +256,7 @@ function Get-MissingUpdates
         try
         {
             $UpdateSearcher = $UpdateSession.CreateUpdateSearcher()
+            Write-Verbose -Message "Update searcher created from update session"
         }
         catch
         {
@@ -265,6 +272,7 @@ function Get-MissingUpdates
         try
         {
             $SearchResult = $UpdateSearcher.Search($UpdateSearchFilter)
+            Write-Verbose -Message "Finished searching for Updates with filter '$UpdateSearchFilter'"
         }
         catch
         {
