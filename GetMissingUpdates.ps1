@@ -327,7 +327,7 @@ function Get-MissingUpdates
                 }
             }
         }
-        "Update scanned"
+        
         $missingUpdates = @()
         foreach ($result in $SearchResult.Updates)
         {
