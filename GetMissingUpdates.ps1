@@ -195,7 +195,8 @@ function Get-MissingUpdates
         param
         (
             [string]$destination,
-            [string]$UpdateSearchFilter
+            [string]$UpdateSearchFilter,
+            $remoteScript
         )
 
         Add-Type -TypeDefinition "
@@ -209,6 +210,27 @@ function Get-MissingUpdates
         }
         " -ErrorAction SilentlyContinue
 
+        if ((Get-CimInstance Win32_OperatingSystem).OperatingSystemSKU -in 1, 2, 3, 4, 6, 11, 27, 28 -and $remoteScript) # Client SKUs
+        {
+            Write-Host 'Client SKU. Registering script as scheduled task'
+            $localScript = [scriptblock]::Create($remoteScript)
+            if (Get-ScheduledJob WorkaroundJob -ErrorAction SilentlyContinue)
+            {
+                Unregister-ScheduledJob -Name WorkaroundJob -Force
+            }
+
+            # On client SKUs, WU-APIs are remoting-aware. We trick them be starting a scheduled job
+            $job = Register-ScheduledJob -ScriptBlock $localScript -Name WorkaroundJob -ArgumentList @($destination, $UpdateSearchFilter)
+            $job.RunAsTask()
+
+            Start-Sleep -Seconds 1
+
+            $job = Get-Job -Name WorkaroundJob | Where-Object -Property State -eq Running
+
+            $jobResult = $job | Wait-Job | Receive-Job
+            return $jobResult
+        }
+
         if (-not (Test-Path -Path $destination))
         {
             throw "Unable to locate $destination. Cancelling..."
@@ -220,7 +242,7 @@ function Get-MissingUpdates
         try 
         {
             $UpdateService = $UpdateServiceManager.AddScanPackageService("Offline Sync Service", $Destination)
-            Write-Verbose -Message "Successfully added scan service with $destination"
+            Write-Host "Successfully added scan service with $destination"
         }
         catch 
         {
@@ -256,7 +278,7 @@ function Get-MissingUpdates
         try
         {
             $UpdateSearcher = $UpdateSession.CreateUpdateSearcher()
-            Write-Verbose -Message "Update searcher created from update session"
+            Write-Host "Update searcher created from update session"
         }
         catch
         {
@@ -272,7 +294,7 @@ function Get-MissingUpdates
         try
         {
             $SearchResult = $UpdateSearcher.Search($UpdateSearchFilter)
-            Write-Verbose -Message "Finished searching for Updates with filter '$UpdateSearchFilter'"
+            Write-Host "Finished searching for Updates with filter '$UpdateSearchFilter'"
         }
         catch
         {
@@ -305,7 +327,7 @@ function Get-MissingUpdates
                 }
             }
         }
-        
+        "Update scanned"
         $missingUpdates = @()
         foreach ($result in $SearchResult.Updates)
         {
@@ -463,7 +485,7 @@ function Get-MissingUpdates
                 }
             }
 
-            Invoke-Command -Session $session -ScriptBlock $remoteScript -HideComputerName -ErrorAction Stop -ArgumentList ($destination, $UpdateSearchFilter)
+            Invoke-Command -Session $session -ScriptBlock $remoteScript -HideComputerName -ErrorAction Stop -ArgumentList ($destination, $UpdateSearchFilter, $remoteScript)
 
             $session | Remove-PSSession
         } -ArgumentList @($computer, $Path, $UpdateSearchFilter, $remoteScript, $Credential)
