@@ -210,7 +210,7 @@ function Get-MissingUpdates
         }
         " -ErrorAction SilentlyContinue
 
-        if ((Get-CimInstance Win32_OperatingSystem).OperatingSystemSKU -in 1, 2, 3, 4, 6, 11, 27, 28 -and $remoteScript) # Client SKUs
+        if ((Get-CimInstance Win32_OperatingSystem).OperatingSystemSKU -in @(1, 2, 3, 4, 6, 11, 27, 28) -and $remoteScript) # Client SKUs
         {
             Write-Host 'Client SKU. Registering script as scheduled task'
             $localScript = [scriptblock]::Create($remoteScript)
