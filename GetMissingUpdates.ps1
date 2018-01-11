@@ -210,9 +210,15 @@ function Get-MissingUpdates
         }
         " -ErrorAction SilentlyContinue
 
-        if ((Get-CimInstance Win32_OperatingSystem).OperatingSystemSKU -in @(1, 2, 3, 4, 6, 11, 27, 28) -and $remoteScript) # Client SKUs
+        if (@(1, 2, 3, 4, 6, 11, 27, 28, 48) -contains (Get-WmiObject Win32_OperatingSystem).OperatingSystemSKU -and $remoteScript) # Client SKUs
         {
             Write-Host 'Client SKU. Registering script as scheduled task'
+
+            if ($PSVersionTable.PSVersion -lt 3.0.0.0)
+            {
+                throw 'Upgrade my WMF version, please.'
+            }
+            
             $localScript = [scriptblock]::Create($remoteScript)
             if (Get-ScheduledJob WorkaroundJob -ErrorAction SilentlyContinue)
             {
