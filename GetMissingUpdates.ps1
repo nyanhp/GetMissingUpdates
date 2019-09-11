@@ -474,7 +474,7 @@ $remoteJobs = foreach ( $computer in $ComputerName)
                 Name         = 'WuaSession'
             }
             
-            $remoteScript = [scriptblock]::Create($remoteScript)
+            $remoteScriptBlock = [scriptblock]::Create($remoteScript)
     
             if ($Credential)
             {
@@ -492,10 +492,10 @@ $remoteJobs = foreach ( $computer in $ComputerName)
                 return $null
             }
     
-            Invoke-Command -Session $session -ScriptBlock $remoteScript -HideComputerName -ErrorAction Stop -ArgumentList ('localhost', $destination, $UpdateSearchFilter)
+            Invoke-Command -Session $session -ScriptBlock $remoteScriptBlock -HideComputerName -ErrorAction Stop -ArgumentList ('localhost', $destination, $UpdateSearchFilter)
     
             $session | Remove-PSSession
-        } -ArgumentList @($computer, $Path, $UpdateSearchFilter, $remoteScript, $Credential)
+        } -ArgumentList @($computer, $Path, $UpdateSearchFilter, $remoteScript.ToString(), $Credential)
     }
     else
     {
