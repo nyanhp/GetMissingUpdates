@@ -341,15 +341,6 @@ $remoteScript = {
         $missingUpdates += $update
     }
 
-    try
-    {
-        Write-Verbose ('Removing WSUS offline file {0}' -f $Destination)
-        Remove-Item -Path $Destination -Force -ErrorAction Stop
-    }
-    catch
-    {
-        Write-Warning -Message ('WSUS offline file {0} could not be removed. Error was {1}' -f $Destination, $_.Exception.Message)
-    }
     return $missingUpdates
 }
 
