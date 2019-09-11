@@ -354,6 +354,7 @@ $remoteScript = {
 }
 
 $count = 1
+$sessions = New-Object -TypeName System.Collections.ArrayList
 $remoteJobs = foreach ( $computer in $ComputerName)
 {
     Write-Progress -Activity 'Creating Jobs' -Status "Copying scan cab to $computer" -PercentComplete (($count / $ComputerName.Count) * 100)
@@ -374,6 +375,7 @@ $remoteJobs = foreach ( $computer in $ComputerName)
     try
     {
         $session = New-PSSession @sessionParameters
+        $null = $sessions.Add($session)
     }
     catch
     {
@@ -449,60 +451,13 @@ $remoteJobs = foreach ( $computer in $ComputerName)
     Write-Progress -Activity 'Creating Jobs' -Status "Starting job to scan $computer" -PercentComplete (($count / $ComputerName.Count) * 100)
             
     if ($UseDcomOverWinRm)
-    {
-        # Shared scan cab is used, 
-        Start-Job -Name "RemoteUpdateCheck_$computer" -ScriptBlock {
-            param(
-                [string]
-                $computer,
-
-                [string]
-                $Path,
-
-                [string]
-                $UpdateSearchFilter,
-
-                [string]
-                $remoteScript,
-
-                [pscredential]
-                $Credential
-            )
-            $sessionParameters = @{
-                ComputerName = $computer
-                ErrorAction  = 'Stop'
-                Name         = 'WuaSession'
-            }
-            
-            $remoteScriptBlock = [scriptblock]::Create($remoteScript)
-    
-            if ($Credential)
-            {
-                $sessionParameters.Add('Credential', $Credential)
-            }
-        
-            try
-            {
-                $session = New-PSSession @sessionParameters
-            }
-            catch
-            {
-                Write-Verbose ('Error establishing connection to {0}. Error message was {1}' -f $computer, $_.Exception.Message) 
-                Write-Error -Message ('Error establishing connection to {0}. Error message was {1}' -f $computer, $_.Exception.Message) -Exception $_.Exception -TargetObject $computer
-                return $null
-            }
-    
-            Invoke-Command -Session $session -ScriptBlock $remoteScriptBlock -HideComputerName -ErrorAction Stop -ArgumentList ($computer, $destination, $UpdateSearchFilter)
-    
-            $session | Remove-PSSession
-        } -ArgumentList @($computer, $Path, $UpdateSearchFilter, $remoteScript.ToString(), $Credential)
+    {    
+        Invoke-Command -Session $session -ScriptBlock $remoteScript -HideComputerName -ErrorAction Stop -ArgumentList ($computer, $destination, $UpdateSearchFilter) -AsJob -JobName RemoteUpdateCheck_$computer
     }
     else
     {
         Start-Job -Name "RemoteUpdateCheck_$computer" -ScriptBlock $remoteScript -ArgumentList @($computer, $Path, $UpdateSearchFilter)    
     }
-    
-    $session | Remove-PSSession
 }
 
 if (-not $Wait.IsPresent)
@@ -510,32 +465,11 @@ if (-not $Wait.IsPresent)
     return $remoteJobs
 }
 
-$sessionParameters = @{
-    ComputerName = $ComputerName
-    ErrorAction  = 'Stop'
-    Name         = 'WuaSession'
-}
-
-
-if ($Credential)
-{
-    $sessionParameters.Add('Credential', $Credential)
-}
-
-try
-{
-    $sessions = New-PSSession @sessionParameters
-}
-catch
-{
-    Write-Verbose ('Error establishing connection to all hosts. Error message was {1}' -f $computer, $_.Exception.Message) 
-    Write-Error -Message ('Error establishing connection to all hosts. Error message was {1}' -f $computer, $_.Exception.Message) -Exception $_.Exception -TargetObject $computer
-}
-
 Write-Verbose -Message ('Waiting for {0} remote jobs to finish' -f $remoteJobs.Count)
 $returnValues = $remoteJobs | Wait-Job -PipelineVariable jobbo | Receive-Job -AutoRemoveJob -Wait | ForEach-Object { $_ | Add-Member -Name ComputerName -MemberType NoteProperty -Value ($jobbo.Name -split "_")[-1] -PassThru }
 
 Write-Verbose -Message 'Cleaning up...'
 Invoke-Command -Session $sessions -ScriptBlock { Remove-Item -Path (Join-Path -Path $env:SystemDrive -ChildPath wsusscn2.cab) -Force }
+$sessions | Remove-PSSession
 
 return $returnValues
