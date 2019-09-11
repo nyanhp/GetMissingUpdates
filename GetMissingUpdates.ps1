@@ -26,6 +26,7 @@
 # arising out of the use of or inability to use the sample scripts or documentation,
 # even if Microsoft has been advised of the possibility of such damages.
 #>
+[CmdletBinding(DefaultParameterSetName = 'Path')]
 param
 (
     [Parameter(Mandatory = $true)]
@@ -55,7 +56,10 @@ param
     [Parameter(Mandatory = $true, ParameterSetName = 'PathWinrm')]
     [Parameter(Mandatory = $true, ParameterSetName = 'UrlWinrm')]
     [switch]
-    $UseDcomOverWinRm
+    $UseDcomOverWinRm,
+
+    [switch]
+    $Wait
 )
 
 if ($DownloadUri)
@@ -306,7 +310,8 @@ $remoteScript = {
             $severity = ([int][MsrcSeverity]$result.MsrcSeverity)
         }
         catch 
-        { }
+        { 
+        }
 
         $bulletinId = ($result.SecurityBulletinIDs | Select-Object -First 1)
         $bulletinUrl = if ($bulletinId) 
@@ -319,20 +324,19 @@ $remoteScript = {
         }    
 
         $update = New-Object -TypeName psobject |
-            Add-Member -MemberType NoteProperty -Name Id -Value ($result.SecurityBulletinIDs | Select-Object -First 1) -PassThru -Force |
-            Add-Member -MemberType NoteProperty -Name Guid -Value $result.Identity.UpdateId -PassThru -Force |
-            Add-Member -MemberType NoteProperty -Name BulletinId -Value $bulletinId -PassThru -Force |
-            Add-Member -MemberType NoteProperty -Name KbId -Value ($result.KBArticleIDs | Select-Object -First 1) -PassThru -Force |
-            Add-Member -MemberType NoteProperty -Name Type -Value $result.Type -PassThru -Force |
-            Add-Member -MemberType NoteProperty -Name IsInstalled -Value $result.IsInstalled -PassThru -Force |
-            Add-Member -MemberType NoteProperty -Name RestartRequired -Value $result.RebootRequired -PassThru -Force |
-            Add-Member -MemberType NoteProperty -Name Title -Value $result.Title -PassThru -Force |
-            Add-Member -MemberType NoteProperty -Name InformationURL -Value ($result.MoreInfoUrls | Select-Object -First 1) -PassThru -Force |
-            Add-Member -MemberType NoteProperty -Name SeverityText -Value $result.MsrcSeverity -PassThru -Force |
-            Add-Member -MemberType NoteProperty -Name Severity -Value $severity -PassThru -ErrorAction SilentlyContinue -Force |
-            Add-Member -MemberType NoteProperty -Name DownloadURL -Value $downloadUrl -PassThru -Force |
-            Add-Member -MemberType NoteProperty -Name BulletinURL -Value $bulletinUrl -PassThru -Force |
-            Add-Member -MemberType NoteProperty -Name ComputerName -Value $env:COMPUTERNAME -PassThru -Force
+        Add-Member -MemberType NoteProperty -Name Id -Value ($result.SecurityBulletinIDs | Select-Object -First 1) -PassThru -Force |
+        Add-Member -MemberType NoteProperty -Name Guid -Value $result.Identity.UpdateId -PassThru -Force |
+        Add-Member -MemberType NoteProperty -Name BulletinId -Value $bulletinId -PassThru -Force |
+        Add-Member -MemberType NoteProperty -Name KbId -Value ($result.KBArticleIDs | Select-Object -First 1) -PassThru -Force |
+        Add-Member -MemberType NoteProperty -Name Type -Value $result.Type -PassThru -Force |
+        Add-Member -MemberType NoteProperty -Name IsInstalled -Value $result.IsInstalled -PassThru -Force |
+        Add-Member -MemberType NoteProperty -Name RestartRequired -Value $result.RebootRequired -PassThru -Force |
+        Add-Member -MemberType NoteProperty -Name Title -Value $result.Title -PassThru -Force |
+        Add-Member -MemberType NoteProperty -Name InformationURL -Value ($result.MoreInfoUrls | Select-Object -First 1) -PassThru -Force |
+        Add-Member -MemberType NoteProperty -Name SeverityText -Value $result.MsrcSeverity -PassThru -Force |
+        Add-Member -MemberType NoteProperty -Name Severity -Value $severity -PassThru -ErrorAction SilentlyContinue -Force |
+        Add-Member -MemberType NoteProperty -Name DownloadURL -Value $downloadUrl -PassThru -Force |
+        Add-Member -MemberType NoteProperty -Name BulletinURL -Value $bulletinUrl -PassThru -Force
 
         $missingUpdates += $update
     }
@@ -349,9 +353,101 @@ $remoteScript = {
     return $missingUpdates
 }
 
+$count = 1
 $remoteJobs = foreach ( $computer in $ComputerName)
-{        
+{
+    Write-Progress -Activity 'Creating Jobs' -Status "Copying scan cab to $computer" -PercentComplete (($count / $ComputerName.Count) * 100)
 
+    # Copy file
+    $sessionParameters = @{
+        ComputerName = $computer
+        ErrorAction  = 'Stop'
+        Name         = 'WuaSession'
+    }
+    
+
+    if ($Credential)
+    {
+        $sessionParameters.Add('Credential', $Credential)
+    }
+
+    try
+    {
+        $session = New-PSSession @sessionParameters
+    }
+    catch
+    {
+        Write-Verbose ('Error establishing connection to {0}. Error message was {1}' -f $computer, $_.Exception.Message) 
+        Write-Error -Message ('Error establishing connection to {0}. Error message was {1}' -f $computer, $_.Exception.Message) -Exception $_.Exception -TargetObject $computer
+        return $null
+    }
+
+    try
+    {
+        $osRoot = Invoke-Command -Session $session -ScriptBlock { $env:SystemDrive } -ErrorAction Stop
+    }
+    catch
+    {
+        Write-Verbose ('Error retrieving OS root path from {0}. Assuming issue with the connection. Error was {1}' -f $computer, $_.Exception.Message)
+        Write-Error -Message ('Error retrieving OS root path from {0}. Assuming issue with the connection. Error was {1}' -f $computer, $_.Exception.Message)
+    }
+        
+    try
+    {
+        $osPSVersion = Invoke-Command -Session $session -ScriptBlock { $PSVersionTable.PSVersion.Major } -ErrorAction Stop
+    }
+    catch
+    {
+        Write-Verbose ('Error retrieving OS Powershell version from {0}. Assuming issue with the connection. Error was {1}' -f $computer, $_.Exception.Message)
+        Write-Error -Message ('Error retrieving OS Powershell version from {0}. Assuming issue with the connection. Error was {1}' -f $computer, $_.Exception.Message)
+    }
+    
+    $adminShare = '\\{0}\{1}$' -f $computer, ($osRoot -replace '[:\\]')
+    $useSmb = Test-Path $adminShare
+    
+    $destination = (Join-Path -Path $osRoot -ChildPath wsusscn2.cab)
+    
+    if ($useSmb)
+    {
+        $smbDestination = (Join-Path -Path $adminShare -ChildPath wsusscn2.cab)
+    
+        try
+        {
+            Write-Verbose ('Using Copy-Item to copy {0} to {1} on {2}' -f $Path, $smbDestination, $computer)
+            Copy-Item -Path $Path -Destination $smbDestination -Force -ErrorAction Stop
+        }
+        catch
+        {
+            Write-Verbose ('Error copying {0} to {1} on target machine {2}' -f $Path, $smbDestination, $computer)
+            Write-Error -Exception $_.Exception -Message ('Error copying {0} to {1} on target machine {2}' -f $Path, $smbDestination, $computer) -TargetObject $Path -Category InvalidOperation
+            return $null
+        }
+    }
+    else
+    {
+        try
+        {
+            if ($PSVersionTable.PSVersion.Major -lt 5 -or $osPSVersion -lt 3)
+            {
+                Write-Verbose ('Using Send-File to copy {0} to {1} on {2} in 1MB chunks' -f $Path, $destination, $computer)
+                Send-File -Source $Path -Destination $destination -Session $session -ChunkSize 1MB -ErrorAction Stop
+            }
+            else
+            {
+                Write-Verbose ('Using Copy-Item -ToSession to copy {0} to {1} on {2}' -f $Path, $destination, $computer)
+                Copy-Item -ToSession $session -Path $Path -Destination $destination -ErrorAction Stop
+            }
+        }
+        catch
+        {
+            Write-Verbose ('Error copying {0} to {1} on target machine {2}' -f $Path, $destination, $computer)
+            Write-Error -Exception $_.Exception -Message ('Error copying {0} to {1} on target machine {2}' -f $Path, $destination, $computer) -TargetObject $Path -Category InvalidOperation
+            return $null
+        }
+    }
+
+    Write-Progress -Activity 'Creating Jobs' -Status "Starting job to scan $computer" -PercentComplete (($count / $ComputerName.Count) * 100)
+            
     if ($UseDcomOverWinRm)
     {
         # Shared scan cab is used, 
@@ -396,85 +492,27 @@ $remoteJobs = foreach ( $computer in $ComputerName)
                 return $null
             }
     
-            try
-            {
-                $osRoot = Invoke-Command -Session $session -ScriptBlock { $env:SystemDrive } -ErrorAction Stop
-            }
-            catch
-            {
-                Write-Verbose ('Error retrieving OS root path from {0}. Assuming issue with the connection. Error was {1}' -f $computer, $_.Exception.Message)
-                Write-Error -Message ('Error retrieving OS root path from {0}. Assuming issue with the connection. Error was {1}' -f $computer, $_.Exception.Message)
-            }
-        
-            try
-            {
-                $osPSVersion = Invoke-Command -Session $session -ScriptBlock { $PSVersionTable.PSVersion.Major } -ErrorAction Stop
-            }
-            catch
-            {
-                Write-Verbose ('Error retrieving OS Powershell version from {0}. Assuming issue with the connection. Error was {1}' -f $computer, $_.Exception.Message)
-                Write-Error -Message ('Error retrieving OS Powershell version from {0}. Assuming issue with the connection. Error was {1}' -f $computer, $_.Exception.Message)
-            }
-    
-            $adminShare = '\\{0}\{1}$' -f $computer, ($osRoot -replace '[:\\]')
-            $useSmb = Test-Path $adminShare
-    
-            $destination = (Join-Path -Path $osRoot -ChildPath wsusscn2.cab)
-    
-            if ($useSmb)
-            {
-                $smbDestination = (Join-Path -Path $adminShare -ChildPath wsusscn2.cab)
-    
-                try
-                {
-                    Write-Verbose ('Using Copy-Item to copy {0} to {1} on {2}' -f $Path, $smbDestination, $computer)
-                    Copy-Item -Path $Path -Destination $smbDestination -Force -ErrorAction Stop
-                }
-                catch
-                {
-                    Write-Verbose ('Error copying {0} to {1} on target machine {2}' -f $Path, $smbDestination, $computer)
-                    Write-Error -Exception $_.Exception -Message ('Error copying {0} to {1} on target machine {2}' -f $Path, $smbDestination, $computer) -TargetObject $Path -Category InvalidOperation
-                    return $null
-                }
-            }
-            else
-            {
-                try
-                {
-                    if ($PSVersionTable.PSVersion.Major -lt 5 -or $osPSVersion -lt 3)
-                    {
-                        Write-Verbose ('Using Send-File to copy {0} to {1} on {2} in 1MB chunks' -f $Path, $destination, $computer)
-                        Send-File -Source $Path -Destination $destination -Session $session -ChunkSize 1MB -ErrorAction Stop
-                    }
-                    else
-                    {
-                        Write-Verbose ('Using Copy-Item -ToSession to copy {0} to {1} on {2}' -f $Path, $destination, $computer)
-                        Copy-Item -ToSession $session -Path $Path -Destination $destination -ErrorAction Stop
-                    }
-                }
-                catch
-                {
-                    Write-Verbose ('Error copying {0} to {1} on target machine {2}' -f $Path, $destination, $computer)
-                    Write-Error -Exception $_.Exception -Message ('Error copying {0} to {1} on target machine {2}' -f $Path, $destination, $computer) -TargetObject $Path -Category InvalidOperation
-                    return $null
-                }
-            }
-    
             Invoke-Command -Session $session -ScriptBlock $remoteScript -HideComputerName -ErrorAction Stop -ArgumentList ('localhost', $destination, $UpdateSearchFilter)
     
             $session | Remove-PSSession
         } -ArgumentList @($computer, $Path, $UpdateSearchFilter, $remoteScript, $Credential)
-        continue
     }
     else
     {
-        #TODO sollte gehen
+        Start-Job -Name "RemoteUpdateCheck_$computer" -ScriptBlock $remoteScript -ArgumentList @($computer, $Path, $UpdateSearchFilter)    
     }
 
-    Start-Job -Name "RemoteUpdateCheck_$computer" -ScriptBlock $remoteScript -ArgumentList @($computer, $Path, $UpdateSearchFilter)    
+    Invoke-Command -Session $session -ScriptBlock { param ($destination) Remove-Item -Path $destination -Force } -ArgumentList $destination
+    
+    $session | Remove-PSSession
+}
+
+if (-not $Wait.IsPresent)
+{
+    return $remoteJobs
 }
 
 Write-Verbose -Message ('Waiting for {0} remote jobs to finish' -f $remoteJobs.Count)
 
-$returnValues = $remoteJobs | Receive-Job -AutoRemoveJob -Wait
+$returnValues = $remoteJobs | Wait-Job -PipelineVariable jobbo | Receive-Job -AutoRemoveJob -Wait | ForEach-Object { $_ | Add-Member -Name ComputerName -MemberType NoteProperty -Value ($jobbo.Name -split "_")[-1] -PassThru }
 return $returnValues
