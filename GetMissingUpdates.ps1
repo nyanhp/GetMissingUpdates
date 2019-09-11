@@ -536,6 +536,6 @@ Write-Verbose -Message ('Waiting for {0} remote jobs to finish' -f $remoteJobs.C
 $returnValues = $remoteJobs | Wait-Job -PipelineVariable jobbo | Receive-Job -AutoRemoveJob -Wait | ForEach-Object { $_ | Add-Member -Name ComputerName -MemberType NoteProperty -Value ($jobbo.Name -split "_")[-1] -PassThru }
 
 Write-Verbose -Message 'Cleaning up...'
-Invoke-Command -Session $sessions -ScriptBlock { param ($destination) Remove-Item -Path $destination -Force } -ArgumentList $destination
+Invoke-Command -Session $sessions -ScriptBlock { Remove-Item -Path (Join-Path -Path $osRoot -ChildPath wsusscn2.cab) -Force }
 
 return $returnValues
