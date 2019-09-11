@@ -20,7 +20,7 @@ In order to use this script, you need to fulfil the following requirements:
 
 This method uses distributed COM and an Activator instance to scan the remote systems. Should you require the use of WinRM sessions, simply use the parameter ```UseDcomOverWinRm``` to create the Activator from within a WinRM session to the remote host.
 
-Regardless of the method you use, the scan cab file needs to be transferred to each remote system and will be removed automatically afterwards. This script attempts to select the fastest available method to copy the file to the remote systems.
+Regardless of the method you use, the scan cab file needs to be transferred to each remote system and will ***only*** be removed automatically afterwards if you opted to wait for the jobs to finish. This script attempts to select the fastest available method to copy the file to the remote systems.
 
 ### Runtime
 

@@ -501,8 +501,6 @@ $remoteJobs = foreach ( $computer in $ComputerName)
     {
         Start-Job -Name "RemoteUpdateCheck_$computer" -ScriptBlock $remoteScript -ArgumentList @($computer, $Path, $UpdateSearchFilter)    
     }
-
-    Invoke-Command -Session $session -ScriptBlock { param ($destination) Remove-Item -Path $destination -Force } -ArgumentList $destination
     
     $session | Remove-PSSession
 }
@@ -512,7 +510,32 @@ if (-not $Wait.IsPresent)
     return $remoteJobs
 }
 
-Write-Verbose -Message ('Waiting for {0} remote jobs to finish' -f $remoteJobs.Count)
+$sessionParameters = @{
+    ComputerName = $ComputerName
+    ErrorAction  = 'Stop'
+    Name         = 'WuaSession'
+}
 
+
+if ($Credential)
+{
+    $sessionParameters.Add('Credential', $Credential)
+}
+
+try
+{
+    $sessions = New-PSSession @sessionParameters
+}
+catch
+{
+    Write-Verbose ('Error establishing connection to all hosts. Error message was {1}' -f $computer, $_.Exception.Message) 
+    Write-Error -Message ('Error establishing connection to all hosts. Error message was {1}' -f $computer, $_.Exception.Message) -Exception $_.Exception -TargetObject $computer
+}
+
+Write-Verbose -Message ('Waiting for {0} remote jobs to finish' -f $remoteJobs.Count)
 $returnValues = $remoteJobs | Wait-Job -PipelineVariable jobbo | Receive-Job -AutoRemoveJob -Wait | ForEach-Object { $_ | Add-Member -Name ComputerName -MemberType NoteProperty -Value ($jobbo.Name -split "_")[-1] -PassThru }
+
+Write-Verbose -Message 'Cleaning up...'
+Invoke-Command -Session $sessions -ScriptBlock { param ($destination) Remove-Item -Path $destination -Force } -ArgumentList $destination
+
 return $returnValues
