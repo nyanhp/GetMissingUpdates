@@ -492,7 +492,7 @@ $remoteJobs = foreach ( $computer in $ComputerName)
                 return $null
             }
     
-            Invoke-Command -Session $session -ScriptBlock $remoteScriptBlock -HideComputerName -ErrorAction Stop -ArgumentList ('localhost', $destination, $UpdateSearchFilter)
+            Invoke-Command -Session $session -ScriptBlock $remoteScriptBlock -HideComputerName -ErrorAction Stop -ArgumentList ($computer, $destination, $UpdateSearchFilter)
     
             $session | Remove-PSSession
         } -ArgumentList @($computer, $Path, $UpdateSearchFilter, $remoteScript.ToString(), $Credential)
