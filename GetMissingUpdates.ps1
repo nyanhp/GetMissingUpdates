@@ -253,7 +253,7 @@ $remoteScript = {
 
     # corresponds to ss_others https://msdn.microsoft.com/en-us/library/windows/desktop/aa387280(v=vs.85).aspx
     $UpdateSearcher.ServerSelection = 3
-    $UpdateSearcher.ServiceID = $UpdateService.ServiceID
+    $UpdateSearcher.ServiceID = [String]$UpdateService.ServiceID
     #$UpdateSearcher.Online = $false
 
     # Initiate the search
